@@ -1,23 +1,16 @@
+# cogs/join_watch.py
 import time
 import discord
 from discord.ext import commands
 
-from utils.db import get_log_channel
-from utils.i18n import t
+from utils.db import get_log_channel, get_risk_config
+from utils.i18n import t as _t   # 👈 t를 _t 별칭으로 임포트
 
-# 기본 임계값 (다음 단계에서 /riskset로 DB설정화 예정)
-MIN_ACCOUNT_AGE_HOURS = 72
-RAID_JOIN_WINDOW_SEC = 30
-RAID_JOIN_COUNT = 5
-
-# 길드별 최근 입장 타임스탬프 버퍼 & 소유자 DM 중복 방지
 _recent_joins: dict[int, list[float]] = {}
-_owner_dm_cooldown: dict[int, float] = {}  # guild_id -> last_sent_ts
-OWNER_DM_COOLDOWN_SEC = 3600  # 1시간에 한 번만 안내 DM
+_owner_dm_cooldown: dict[int, float] = {}
+OWNER_DM_COOLDOWN_SEC = 3600
 
 class JoinWatchCog(commands.Cog):
-    """신규 유저 입장 시 위험 신호를 감지하고 로그 채널에 경고를 보냅니다."""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
@@ -48,60 +41,57 @@ class JoinWatchCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        # 봇 계정 제외
         if member.bot:
             return
 
         guild = member.guild
+        r = get_risk_config(guild.id)
+        MIN_ACCOUNT_AGE_HOURS = r["min_account_age_hours"]
+        RAID_JOIN_WINDOW_SEC = r["raid_join_window_sec"]
+        RAID_JOIN_COUNT = r["raid_join_count"]
+
         reasons: list[str] = []
 
-        # 1) 계정 나이 검사
+        # 1) 계정 나이
         acct_age_hours = (
             (discord.utils.utcnow() - member.created_at).total_seconds() / 3600
         )
         if acct_age_hours < MIN_ACCOUNT_AGE_HOURS:
-            # ko/en 문구는 로그 임베드에서 처리
             reasons.append("new_account")
 
-        # 2) 레이드 의심(단시간 동시 입장 수)
+        # 2) 레이드 의심
         now = time.time()
         buf = _recent_joins.setdefault(guild.id, [])
         buf.append(now)
-        # 윈도 밖 제거
-        _recent_joins[guild.id] = [t for t in buf if now - t <= RAID_JOIN_WINDOW_SEC]
+        # 👇 변수명을 ts로 변경(섀도잉 회피)
+        _recent_joins[guild.id] = [ts for ts in buf if now - ts <= RAID_JOIN_WINDOW_SEC]
         join_count = len(_recent_joins[guild.id])
         if join_count >= RAID_JOIN_COUNT:
             reasons.append("raid_surge")
 
-        # 위험 신호가 없으면 종료
         if not reasons:
             return
 
-        # 유저 DM 공지(가능하면)
+        # DM 안내
         try:
-            await member.send(t(guild.id, "dm_join_notice"))
+            await member.send(_t(guild.id, "dm_join_notice"))
         except Exception:
             pass
 
-        # 로그용 임베드 구성
+        # 로그 임베드
         reason_str_parts = []
         if "new_account" in reasons:
             reason_str_parts.append(
-                t(guild.id, "log_join_reason_new", hours=f"{acct_age_hours:.1f}")
+                _t(guild.id, "log_join_reason_new", hours=f"{acct_age_hours:.1f}")
             )
         if "raid_surge" in reasons:
             reason_str_parts.append(
-                t(
-                    guild.id,
-                    "log_join_reason_raid",
-                    count=join_count,
-                    sec=RAID_JOIN_WINDOW_SEC,
-                )
+                _t(guild.id, "log_join_reason_raid", count=join_count, sec=RAID_JOIN_WINDOW_SEC)
             )
         reason_str = " • ".join(reason_str_parts)
 
         emb = discord.Embed(
-            title=t(guild.id, "log_join_title"),
+            title=_t(guild.id, "log_join_title"),
             color=0xE53935,
             description=(
                 f"**User:** {member.mention} (`{member}`)\n"
@@ -109,8 +99,9 @@ class JoinWatchCog(commands.Cog):
                 f"**Reason:** {reason_str}"
             ),
         )
-        emb.set_thumbnail(url=member.display_avatar.url if member.display_avatar else discord.Embed.Empty)
-        emb.set_footer(text=t(guild.id, "log_join_footer_config"))
+        if member.display_avatar:
+            emb.set_thumbnail(url=member.display_avatar.url)
+        emb.set_footer(text=_t(guild.id, "log_join_footer_config"))
 
         sent = await self._send_log(guild, emb)
         if not sent:

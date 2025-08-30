@@ -23,6 +23,18 @@ TEXTS = {
         "log_spam_reason_everyone": "@everyone/@here 멘션 사용 차단",
         "log_spam_reason_mentions": "멘션 폭탄 (mentions={mentions}, limit={limit})",
         "log_spam_reason_link": "의심스러운 링크/도메인 차단",
+        "policies_title": "🔧 현재 정책",
+        "policies_body": (
+            "**Risk**\n"
+            "- 계정 최소 나이: {min_age}h\n- 레이드 판정: {raid_count}명/{raid_win}s\n\n"
+            "**Spam**\n"
+            "- 10초 최대 메시지: {max_msgs}\n- 1메시지 최대 멘션: {max_mentions}\n"
+            "- @everyone/@here 차단: {block_eh}\n- 링크 필터: {link_filter}"
+        ),
+        "riskset_ok": "✅ Risk 정책이 업데이트되었습니다.",
+        "spamset_ok": "✅ Spam 정책이 업데이트되었습니다.",
+        "bool_on": "켜짐",
+        "bool_off": "꺼짐",
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -45,6 +57,18 @@ TEXTS = {
         "log_spam_reason_everyone": "Blocked @everyone/@here mention",
         "log_spam_reason_mentions": "Mention bomb (mentions={mentions}, limit={limit})",
         "log_spam_reason_link": "Suspicious link/domain blocked",
+        "policies_title": "🔧 Current Policies",
+        "policies_body": (
+            "**Risk**\n"
+            "- Min account age: {min_age}h\n- Raid detection: {raid_count} users/{raid_win}s\n\n"
+            "**Spam**\n"
+            "- Max msgs per 10s: {max_msgs}\n- Max mentions per msg: {max_mentions}\n"
+            "- Block @everyone/@here: {block_eh}\n- Link filter: {link_filter}"
+        ),
+        "riskset_ok": "✅ Risk policy updated.",
+        "spamset_ok": "✅ Spam policy updated.",
+        "bool_on": "ON",
+        "bool_off": "OFF",
     },
 }
 
