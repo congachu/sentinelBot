@@ -16,6 +16,13 @@ TEXTS = {
         "log_join_reason_new": "새 계정(≈{hours}h)",
         "log_join_reason_raid": "단시간 동시 입장 {count}명/{sec}s",
         "log_join_footer_config": "로그 채널은 /setlog 로 변경할 수 있습니다.",
+        "log_spam_title": "🚨 스팸/남용 감지",
+        "log_spam_footer_config": "스팸 정책은 차후 /spamset 으로 조정 예정",
+        "dm_spam_notice": "🔒 안내: 서버의 스팸/남용 방지 정책에 의해 메시지가 제어되었습니다. 문제가 있으면 관리자에게 문의하세요.",
+        "log_spam_reason_rate": "단시간 과도한 메시지 ({count} / 10s)",
+        "log_spam_reason_everyone": "@everyone/@here 멘션 사용 차단",
+        "log_spam_reason_mentions": "멘션 폭탄 (mentions={mentions}, limit={limit})",
+        "log_spam_reason_link": "의심스러운 링크/도메인 차단",
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -31,6 +38,13 @@ TEXTS = {
         "log_join_reason_new": "New account (≈{hours}h)",
         "log_join_reason_raid": "Join surge {count} users/{sec}s",
         "log_join_footer_config": "You can change the log channel with /setlog.",
+        "log_spam_title": "🚨 Spam/Abuse Detected",
+        "log_spam_footer_config": "Policy adjustable later via /spamset",
+        "dm_spam_notice": "🔒 Notice: Your message was moderated by the server's anti-spam policy. Contact admins if this was a mistake.",
+        "log_spam_reason_rate": "Excessive message rate ({count} / 10s)",
+        "log_spam_reason_everyone": "Blocked @everyone/@here mention",
+        "log_spam_reason_mentions": "Mention bomb (mentions={mentions}, limit={limit})",
+        "log_spam_reason_link": "Suspicious link/domain blocked",
     },
 }
 

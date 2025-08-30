@@ -12,7 +12,8 @@ load_dotenv()
 class AClient(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        intents.members = True  # Server Members Intent (필요 시 개발자 포털에서 활성화)
+        intents.members = True
+        intents.message_content = True
 
         super().__init__(command_prefix="!", intents=intents)
         self.synced = False
