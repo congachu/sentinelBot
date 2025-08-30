@@ -1,3 +1,4 @@
+# cogs/policies.py
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -8,10 +9,10 @@ from utils.db import (
     get_spam_config, set_spam_config,
     get_lockdown_config
 )
-from utils.i18n import t
+from utils.i18n import t as _t
 
 class PoliciesCog(commands.Cog):
-    """길드별 Risk/Spam 정책을 조회/수정합니다."""
+    """길드별 Risk/Spam/Lockdown 정책 조회/설정"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -24,7 +25,7 @@ class PoliciesCog(commands.Cog):
         s = get_spam_config(itx.guild_id)
         l = get_lockdown_config(itx.guild_id)
 
-        body = t(
+        body = _t(
             itx.guild_id,
             "policies_body",
             min_age=r["min_account_age_hours"],
@@ -32,19 +33,17 @@ class PoliciesCog(commands.Cog):
             raid_win=r["raid_join_window_sec"],
             max_msgs=s["max_msgs_per_10s"],
             max_mentions=s["max_mentions_per_msg"],
-            block_eh=t(itx.guild_id, "bool_on") if s["block_everyone_here"] else t(itx.guild_id, "bool_off"),
-            link_filter=t(itx.guild_id, "bool_on") if s["enable_link_filter"] else t(itx.guild_id, "bool_off"),
+            block_eh=_t(itx.guild_id, "bool_on") if s["block_everyone_here"] else _t(itx.guild_id, "bool_off"),
+            link_filter=_t(itx.guild_id, "bool_on") if s["enable_link_filter"] else _t(itx.guild_id, "bool_off"),
         )
-
-        # 👇 락다운 섹션 추가
         body += (
-            f"\n{t(itx.guild_id, 'lockdown_title')}\n"
-            f"{t(itx.guild_id, 'lockdown_enabled', state=t(itx.guild_id, 'bool_on') if l['enabled'] else t(itx.guild_id, 'bool_off'))}\n"
-            f"{t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
-            f"{t(itx.guild_id, 'lockdown_min_guild_age', hours=l['min_guild_age_hours'])}"
+            f"\n{_t(itx.guild_id, 'lockdown_title')}\n"
+            f"{_t(itx.guild_id, 'lockdown_enabled', state=_t(itx.guild_id, 'bool_on') if l['enabled'] else _t(itx.guild_id, 'bool_off'))}\n"
+            f"{_t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
+            f"{_t(itx.guild_id, 'lockdown_min_guild_age', hours=l['min_guild_age_hours'])}"
         )
 
-        emb = discord.Embed(title=t(itx.guild_id, "policies_title"), description=body, color=0x546E7A)
+        emb = discord.Embed(title=_t(itx.guild_id, "policies_title"), description=body, color=0x546E7A)
         await itx.response.send_message(embed=emb, ephemeral=True)
 
     @app_commands.command(name="riskset", description="Set risk policy / Risk 정책 설정")
@@ -68,12 +67,17 @@ class PoliciesCog(commands.Cog):
             raid_join_window_sec=raid_join_window_sec,
             raid_join_count=raid_join_count,
         )
+        # 캐시 즉시 무효화 이벤트
+        self.bot.dispatch("risk_config_updated", itx.guild_id)
+
         r = get_risk_config(itx.guild_id)
-        emb = discord.Embed(
-            title=t(itx.guild_id, "riskset_ok"),
-            description=f"min_age={r['min_account_age_hours']}h, raid={r['raid_join_count']}/{r['raid_join_window_sec']}s",
-            color=0x455A64,
+        desc = (
+            f"{_t(itx.guild_id, 'riskset_ok')}\n"
+            f"- Min account age: {r['min_account_age_hours']}h\n"
+            f"- Raid detection: {r['raid_join_count']} users/{r['raid_join_window_sec']}s\n\n"
+            f"{_t(itx.guild_id, 'policy_update_delay')}"
         )
+        emb = discord.Embed(title="🔧 Risk Policy", description=desc, color=0x455A64)
         await itx.response.send_message(embed=emb, ephemeral=True)
 
     @app_commands.command(name="spamset", description="Set spam policy / Spam 정책 설정")
@@ -100,17 +104,19 @@ class PoliciesCog(commands.Cog):
             block_everyone_here=block_everyone_here,
             enable_link_filter=enable_link_filter,
         )
+        # 캐시 즉시 무효화 이벤트
+        self.bot.dispatch("spam_config_updated", itx.guild_id)
+
         s = get_spam_config(itx.guild_id)
-        emb = discord.Embed(
-            title=t(itx.guild_id, "spamset_ok"),
-            description=(
-                f"max_msgs/10s={s['max_msgs_per_10s']}, "
-                f"max_mentions={s['max_mentions_per_msg']}, "
-                f"@everyone/here={'ON' if s['block_everyone_here'] else 'OFF'}, "
-                f"link_filter={'ON' if s['enable_link_filter'] else 'OFF'}"
-            ),
-            color=0x455A64,
+        desc = (
+            f"{_t(itx.guild_id, 'spamset_ok')}\n"
+            f"- Max msgs/10s: {s['max_msgs_per_10s']}\n"
+            f"- Max mentions/msg: {s['max_mentions_per_msg']}\n"
+            f"- Block @everyone/@here: {'ON' if s['block_everyone_here'] else 'OFF'}\n"
+            f"- Link filter: {'ON' if s['enable_link_filter'] else 'OFF'}\n\n"
+            f"{_t(itx.guild_id, 'policy_update_delay')}"
         )
+        emb = discord.Embed(title="🛡️ Spam Policy", description=desc, color=0x455A64)
         await itx.response.send_message(embed=emb, ephemeral=True)
 
 async def setup(bot: commands.Bot):

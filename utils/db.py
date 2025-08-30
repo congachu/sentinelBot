@@ -19,19 +19,27 @@ def get_conn():
 async def init_db():
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guild_config (
-              guild_id    BIGINT PRIMARY KEY,
-              log_channel BIGINT,
-              lang        TEXT NOT NULL DEFAULT 'ko',
-              risk        JSONB,
-              spam        JSONB,
-              lockdown    JSONB,
-              panic       JSONB
-            );
-            """
-        )
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS guild_config (
+          guild_id    BIGINT PRIMARY KEY,
+          log_channel BIGINT,
+          lang        TEXT NOT NULL DEFAULT 'ko',
+          risk        JSONB,
+          spam        JSONB,
+          lockdown    JSONB,
+          panic       JSONB
+        );
+        """)
+        # ▶ 백업 스냅샷 저장 테이블
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS guild_backups (
+          id         BIGSERIAL PRIMARY KEY,
+          guild_id   BIGINT NOT NULL,
+          label      TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          data       JSONB NOT NULL
+        );
+        """)
     _ensure_columns()
 
 def _ensure_columns():
@@ -41,39 +49,19 @@ def _ensure_columns():
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS spam JSONB;")
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS lockdown JSONB;")
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS panic JSONB;")
-
-        # 기본값 채우기
-        cur.execute("""
-        UPDATE guild_config
-        SET risk = COALESCE(risk, jsonb_build_object(
-            'min_account_age_hours', 72,
-            'raid_join_window_sec', 30,
-            'raid_join_count', 5
-        ));
-        """)
-        cur.execute("""
-        UPDATE guild_config
-        SET spam = COALESCE(spam, jsonb_build_object(
-            'max_msgs_per_10s', 8,
-            'max_mentions_per_msg', 5,
-            'block_everyone_here', true,
-            'enable_link_filter', false
-        ));
-        """)
-        cur.execute("""
-        UPDATE guild_config
-        SET lockdown = COALESCE(lockdown, jsonb_build_object(
-            'enabled', false,
-            'min_account_age_hours', 72,         -- 계정 나이 기준
-            'min_guild_age_hours', 24            -- 서버 합류 후 경과 시간 기준
-        ));
-        """)
-        cur.execute("""
-        UPDATE guild_config
-        SET panic = COALESCE(panic, jsonb_build_object(
-            'enabled', false
-        ));
-        """)
+        # 기본값 주입
+        cur.execute("""UPDATE guild_config
+                       SET risk = COALESCE(risk, jsonb_build_object(
+                         'min_account_age_hours', 72, 'raid_join_window_sec', 30, 'raid_join_count', 5));""")
+        cur.execute("""UPDATE guild_config
+                       SET spam = COALESCE(spam, jsonb_build_object(
+                         'max_msgs_per_10s', 8, 'max_mentions_per_msg', 5,
+                         'block_everyone_here', true, 'enable_link_filter', false));""")
+        cur.execute("""UPDATE guild_config
+                       SET lockdown = COALESCE(lockdown, jsonb_build_object(
+                         'enabled', false, 'min_account_age_hours', 72, 'min_guild_age_hours', 24));""")
+        cur.execute("""UPDATE guild_config
+                       SET panic = COALESCE(panic, jsonb_build_object('enabled', false));""")
 
 def upsert_guild(guild_id: int):
     conn = get_conn()
@@ -254,3 +242,36 @@ def set_panic_state(guild_id: int, enabled: bool, backup: dict | None):
             """,
             (guild_id, json.dumps({"enabled": enabled, "backup": backup})),
         )
+
+def save_backup(guild_id: int, label: str | None, data: dict) -> int:
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO guild_backups (guild_id, label, data) VALUES (%s, %s, %s::jsonb) RETURNING id;",
+            (guild_id, label, json.dumps(data)),
+        )
+        return cur.fetchone()["id"]
+
+def list_backups(guild_id: int, limit: int = 10):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("""SELECT id, label, created_at
+                       FROM guild_backups
+                       WHERE guild_id=%s
+                       ORDER BY id DESC
+                       LIMIT %s;""", (guild_id, limit))
+        return cur.fetchall()
+
+def get_backup(guild_id: int, backup_id: int) -> dict | None:
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("""SELECT data FROM guild_backups
+                       WHERE guild_id=%s AND id=%s;""", (guild_id, backup_id))
+        row = cur.fetchone()
+        return dict(row["data"]) if row else None
+
+def delete_backup(guild_id: int, backup_id: int) -> bool:
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM guild_backups WHERE guild_id=%s AND id=%s;", (guild_id, backup_id))
+        return cur.rowcount > 0
