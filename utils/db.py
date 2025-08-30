@@ -13,6 +13,65 @@ def get_conn():
         _conn.autocommit = True
     return _conn
 
+async def init_db():
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS guild_config (
+              guild_id    BIGINT PRIMARY KEY,
+              log_channel BIGINT,
+              lang        TEXT NOT NULL DEFAULT 'ko',
+              risk        JSONB,
+              spam        JSONB,
+              lockdown    JSONB,
+              panic       JSONB
+            );
+            """
+        )
+    _ensure_columns()
+
+def _ensure_columns():
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS risk JSONB;")
+        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS spam JSONB;")
+        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS lockdown JSONB;")
+        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS panic JSONB;")
+
+        # 기본값 채우기
+        cur.execute("""
+        UPDATE guild_config
+        SET risk = COALESCE(risk, jsonb_build_object(
+            'min_account_age_hours', 72,
+            'raid_join_window_sec', 30,
+            'raid_join_count', 5
+        ));
+        """)
+        cur.execute("""
+        UPDATE guild_config
+        SET spam = COALESCE(spam, jsonb_build_object(
+            'max_msgs_per_10s', 8,
+            'max_mentions_per_msg', 5,
+            'block_everyone_here', true,
+            'enable_link_filter', false
+        ));
+        """)
+        cur.execute("""
+        UPDATE guild_config
+        SET lockdown = COALESCE(lockdown, jsonb_build_object(
+            'enabled', false,
+            'min_account_age_hours', 72,         -- 계정 나이 기준
+            'min_guild_age_hours', 24            -- 서버 합류 후 경과 시간 기준
+        ));
+        """)
+        cur.execute("""
+        UPDATE guild_config
+        SET panic = COALESCE(panic, jsonb_build_object(
+            'enabled', false
+        ));
+        """)
+
 def upsert_guild(guild_id: int):
     conn = get_conn()
     with conn.cursor() as cur:
