@@ -1,7 +1,6 @@
-import os
+import os, json
 import psycopg2
 from psycopg2.extras import DictCursor
-import json
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -13,47 +12,6 @@ def get_conn():
         _conn = psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor)
         _conn.autocommit = True
     return _conn
-
-def _ensure_columns():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        # JSONB 컬럼 추가(없으면)
-        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS risk JSONB;")
-        cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS spam JSONB;")
-        # 기본값 채우기
-        cur.execute("""
-        UPDATE guild_config
-        SET risk = COALESCE(risk, jsonb_build_object(
-            'min_account_age_hours', 72,
-            'raid_join_window_sec', 30,
-            'raid_join_count', 5
-        ));
-        """)
-        cur.execute("""
-        UPDATE guild_config
-        SET spam = COALESCE(spam, jsonb_build_object(
-            'max_msgs_per_10s', 8,
-            'max_mentions_per_msg', 5,
-            'block_everyone_here', true,
-            'enable_link_filter', false
-        ));
-        """)
-
-async def init_db():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guild_config (
-              guild_id    BIGINT PRIMARY KEY,
-              log_channel BIGINT,
-              lang        TEXT NOT NULL DEFAULT 'ko',
-              risk        JSONB,
-              spam        JSONB
-            );
-            """
-        )
-    _ensure_columns()
 
 def upsert_guild(guild_id: int):
     conn = get_conn()
@@ -177,4 +135,60 @@ def set_spam_config(guild_id: int, **kwargs):
             DO UPDATE SET spam = guild_config.spam || EXCLUDED.spam;
             """,
             (guild_id, json.dumps(payload)),
+        )
+
+def get_lockdown_config(guild_id: int) -> dict:
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT lockdown FROM guild_config WHERE guild_id=%s;", (guild_id,))
+        row = cur.fetchone()
+        base = {
+            "enabled": False,
+            "min_account_age_hours": 72,
+            "min_guild_age_hours": 24,
+        }
+        if not row or not row["lockdown"]:
+            return base
+        val = dict(row["lockdown"])
+        return {**base, **val}
+
+def set_lockdown_config(guild_id: int, **kwargs):
+    allowed = {"enabled", "min_account_age_hours", "min_guild_age_hours"}
+    payload = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not payload:
+        return
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO guild_config (guild_id, lockdown)
+            VALUES (%s, %s)
+            ON CONFLICT (guild_id)
+            DO UPDATE SET lockdown = guild_config.lockdown || EXCLUDED.lockdown;
+            """,
+            (guild_id, json.dumps(payload)),
+        )
+
+def get_panic_state(guild_id: int) -> dict:
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT panic FROM guild_config WHERE guild_id=%s;", (guild_id,))
+        row = cur.fetchone()
+        base = {"enabled": False, "backup": None}
+        if not row or not row["panic"]:
+            return base
+        val = dict(row["panic"])
+        return {**base, **val}
+
+def set_panic_state(guild_id: int, enabled: bool, backup: dict | None):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO guild_config (guild_id, panic)
+            VALUES (%s, %s)
+            ON CONFLICT (guild_id)
+            DO UPDATE SET panic = EXCLUDED.panic;
+            """,
+            (guild_id, json.dumps({"enabled": enabled, "backup": backup})),
         )

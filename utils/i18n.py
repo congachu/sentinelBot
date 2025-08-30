@@ -35,6 +35,18 @@ TEXTS = {
         "spamset_ok": "✅ Spam 정책이 업데이트되었습니다.",
         "bool_on": "켜짐",
         "bool_off": "꺼짐",
+        "panic_on": "🚨 패닉 모드가 활성화되었습니다. 모든 텍스트 채널을 읽기 전용으로 전환했습니다.",
+        "panic_off": "✅ 패닉 모드가 해제되어 채널 권한을 원복했습니다.",
+        "panic_already_on": "ℹ️ 이미 패닉 모드입니다.",
+        "panic_already_off": "ℹ️ 패닉 모드가 아닙니다.",
+        "panic_partial_warn": "⚠️ 일부 채널 권한 원복에 실패했습니다. 수동 확인이 필요할 수 있습니다.",
+
+        "lockdown_on": "🛡️ 락다운이 활성화되었습니다. 신규/의심 계정의 메시지가 제한됩니다.",
+        "lockdown_off": "✅ 락다운이 해제되었습니다.",
+        "lockdown_already_on": "ℹ️ 이미 락다운 상태입니다.",
+        "lockdown_already_off": "ℹ️ 락다운 상태가 아닙니다.",
+        "lockdownset_ok": "✅ 락다운 임계값이 업데이트되었습니다.",
+        "msg_blocked_lockdown": "🔒 안내: 현재 서버 락다운 상태로, 신규/의심 계정의 메시지는 제한됩니다.",
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -69,6 +81,18 @@ TEXTS = {
         "spamset_ok": "✅ Spam policy updated.",
         "bool_on": "ON",
         "bool_off": "OFF",
+        "panic_on": "🚨 Panic mode enabled. All text channels set to read-only.",
+        "panic_off": "✅ Panic mode disabled. Permissions restored.",
+        "panic_already_on": "ℹ️ Panic mode is already ON.",
+        "panic_already_off": "ℹ️ Panic mode is not active.",
+        "panic_partial_warn": "⚠️ Failed to restore some channels. Manual review may be required.",
+
+        "lockdown_on": "🛡️ Lockdown enabled. Messages from new/suspicious accounts will be restricted.",
+        "lockdown_off": "✅ Lockdown disabled.",
+        "lockdown_already_on": "ℹ️ Lockdown is already ON.",
+        "lockdown_already_off": "ℹ️ Lockdown is not active.",
+        "lockdownset_ok": "✅ Lockdown thresholds updated.",
+        "msg_blocked_lockdown": "🔒 Notice: During lockdown, messages from new/suspicious accounts are restricted.",
     },
 }
 
