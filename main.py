@@ -71,7 +71,7 @@ class AClient(commands.Bot):
         try:
             uptime = datetime.datetime.utcnow() - self.start_time
             guild_count = len(self.guilds)
-            text = f"🔒 {guild_count} servers  |  ⏱ {self.format_uptime(uptime)}"
+            text = f"🔒 {guild_count} servers | ⏱ {self.format_uptime(uptime)}"
             # Game 상태(원하면 ActivityType.watching 등으로 변경 가능)
             await self.change_presence(activity=discord.Game(text))
         except Exception as e:
@@ -84,7 +84,7 @@ class AClient(commands.Bot):
             try:
                 uptime = datetime.datetime.utcnow() - self.start_time
                 guild_count = len(self.guilds)
-                text = f"🔒 {guild_count} sentinel | ⏱ {self.format_uptime(uptime)}"
+                text = f"🔒 {guild_count} servers | ⏱ {self.format_uptime(uptime)}"
                 await self.change_presence(activity=discord.Game(text))
                 await asyncio.sleep(60)  # 1분마다 업데이트
             except Exception as e:
