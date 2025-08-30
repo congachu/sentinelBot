@@ -6,6 +6,7 @@ from discord.ext import commands
 from utils.i18n import t as _t
 
 # SentinelBot에서 제공하는 주요 명령을 카테고리로 정리
+# kind: "Slash" = 일반 슬래시, "Group" = 그룹 명령(하위 커맨드 존재)
 CATEGORIES = {
     "basic": [
         ("setlog", "Slash"),
@@ -18,6 +19,7 @@ CATEGORIES = {
         ("riskset", "Slash"),
         ("spamset", "Slash"),
         ("lockdownset", "Slash"),
+        ("spamallow", "Group"),  # ✅ 화이트리스트 그룹 명령 추가
     ],
     "admin": [
         ("lockdown", "Slash"),
@@ -32,15 +34,22 @@ CATEGORIES = {
     ],
 }
 
+
 def _command_lookup(bot: commands.Bot) -> dict[str, app_commands.Command]:
+    """
+    슬래시 명령을 조회하기 쉽게 평탄화한다.
+    - 단일 명령: "name"
+    - 그룹 명령: "group", 그리고 하위는 "group sub" 키로 접근 가능
+    """
     table: dict[str, app_commands.Command] = {}
     for cmd in bot.tree.get_commands():
         table[cmd.name] = cmd
-        # 그룹 커맨드 처리(있을 경우)
         if isinstance(cmd, app_commands.Group):
+            # 그룹 자체도 키로 등록
             for sub in cmd.commands:
-                table[sub.name] = sub
+                table[f"{cmd.name} {sub.name}"] = sub  # 예: "spamallow add"
     return table
+
 
 class HelpCog(commands.Cog):
     """한/영 도움말"""
@@ -49,7 +58,7 @@ class HelpCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="help", description="Show help / 도움말 보기")
-    @app_commands.describe(command="명령어 이름(선택) / Command name (optional)")
+    @app_commands.describe(command="명령어 이름(선택). 예) spamallow add / Command name (optional). e.g., spamallow add")
     async def help_cmd(self, itx: discord.Interaction, command: str | None = None):
         guild_id = itx.guild_id or 0
         await itx.response.defer(ephemeral=True, thinking=False)
@@ -57,13 +66,18 @@ class HelpCog(commands.Cog):
         # 특정 명령 상세
         if command:
             table = _command_lookup(self.bot)
-            cmd = table.get(command.lower())
+            key = command.strip().lower()
+            cmd = table.get(key)
             if not cmd:
-                await itx.followup.send(_t(guild_id, "help_unknown_command", name=command), ephemeral=True)
-                return
+                # 단일 이름만 들어온 경우 다시 한 번 시도
+                cmd = table.get(key.split()[0]) if " " in key else None
+                if not cmd:
+                    await itx.followup.send(_t(guild_id, "help_unknown_command", name=command), ephemeral=True)
+                    return
 
-            # 간단한 상세 정보 (설명 + 사용법 표기)
-            title = _t(guild_id, "help_command_title", name=f"/{cmd.name}")
+            # 표시용 이름: 공백 포함 입력이면 그대로, 아니면 /cmd.name
+            display_name = f"/{key}" if " " in key else f"/{cmd.name}"
+            title = _t(guild_id, "help_command_title", name=display_name)
             desc_lines = [
                 _t(guild_id, "help_command_desc"),
                 f"> {cmd.description or '-'}",
@@ -73,15 +87,14 @@ class HelpCog(commands.Cog):
             if getattr(cmd, "parameters", None):
                 desc_lines.append(_t(guild_id, "help_command_usage"))
                 for p in cmd.parameters:
-                    opt = "optional" if p.default is not app_commands._missing.MISSING else "required"
-                    # 한/영 변환
-                    opt_txt = _t(guild_id, "help_optional") if opt == "optional" else _t(guild_id, "help_required")
+                    # discord.py 내부 MISSING 비교 안전 처리
+                    required = getattr(p, "required", False)
+                    opt_txt = _t(guild_id, "help_required") if required else _t(guild_id, "help_optional")
                     desc_lines.append(f"- `{p.name}` ({opt_txt}) — {p.description or '-'}")
 
-            # 예시 안내(간단)
+            # 예시 안내
             desc_lines.append("")
             desc_lines.append(_t(guild_id, "help_examples_header"))
-            # 대표 예시 몇 개
             examples = {
                 "setlog": "/setlog #security-log",
                 "setlang": "/setlang ko",
@@ -93,13 +106,20 @@ class HelpCog(commands.Cog):
                 "unpanic": "/unpanic",
                 "backup_create": "/backup_create label:baseline",
                 "backup_restore": "/backup_restore 12",
+                # ✅ 그룹 예시
+                "spamallow": "/spamallow add @Trusted\n/spamallow remove @Trusted\n/spamallow list",
+                "spamallow add": "/spamallow add @Trusted",
+                "spamallow remove": "/spamallow remove @Trusted",
+                "spamallow list": "/spamallow list",
             }
-            sample = examples.get(cmd.name)
+            sample = examples.get(key) or examples.get(cmd.name)
             if sample:
-                desc_lines.append(f"• `{sample}`")
+                # 여러 줄 예시는 그대로 표시
+                for line in str(sample).splitlines():
+                    desc_lines.append(f"• `{line}`")
 
             # 정책 반영 지연 안내(해당되는 명령에만)
-            if cmd.name in {"riskset", "spamset", "lockdownset"}:
+            if (key.split()[0] if " " in key else cmd.name) in {"riskset", "spamset", "lockdownset"}:
                 desc_lines.append("")
                 desc_lines.append(_t(guild_id, "policy_update_delay"))
 
@@ -126,8 +146,13 @@ class HelpCog(commands.Cog):
         table = _command_lookup(self.bot)
         for key, items in CATEGORIES.items():
             present = []
-            for name, _kind in items:
-                if name in table:
+            for name, kind in items:
+                if name not in table:
+                    continue
+                if kind == "Group":
+                    # 그룹은 add|remove|list 를 안내에 함께 표시
+                    present.append(f"`/{name} add|remove|list` — {table[name].description or '-'}")
+                else:
                     present.append(f"`/{name}` — {table[name].description or '-'}")
             if present:
                 emb.add_field(name=labels[key], value="\n".join(present), inline=False)
@@ -140,6 +165,7 @@ class HelpCog(commands.Cog):
         emb.set_footer(text=_t(guild_id, "help_footer"))
 
         await itx.followup.send(embed=emb, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(HelpCog(bot))

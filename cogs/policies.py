@@ -2,17 +2,19 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-
+from typing import Literal
 from utils.db import (
     upsert_guild,
     get_risk_config, set_risk_config,
     get_spam_config, set_spam_config,
-    get_lockdown_config
+    get_lockdown_config,
+    add_spam_whitelist_role, remove_spam_whitelist_role
 )
 from utils.i18n import t as _t
 
+
 class PoliciesCog(commands.Cog):
-    """길드별 Risk/Spam/Lockdown 정책 조회/설정"""
+    """길드별 Risk/Spam/Lockdown 정책 조회/설정 + 화이트리스트"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -24,6 +26,9 @@ class PoliciesCog(commands.Cog):
         r = get_risk_config(itx.guild_id)
         s = get_spam_config(itx.guild_id)
         l = get_lockdown_config(itx.guild_id)
+
+        wl = s.get("everyone_whitelist", [])
+        wl_txt = ", ".join(f"<@&{rid}>" for rid in wl) if wl else _t(itx.guild_id, "none")
 
         body = _t(
             itx.guild_id,
@@ -37,6 +42,7 @@ class PoliciesCog(commands.Cog):
             link_filter=_t(itx.guild_id, "bool_on") if s["enable_link_filter"] else _t(itx.guild_id, "bool_off"),
         )
         body += (
+            f"\n- Whitelist: {wl_txt}"
             f"\n\n{_t(itx.guild_id, 'lockdown_title')}\n"
             f"- {_t(itx.guild_id, 'lockdown_enabled', state=_t(itx.guild_id, 'bool_on') if l['enabled'] else _t(itx.guild_id, 'bool_off'))}\n"
             f"- {_t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
@@ -67,7 +73,6 @@ class PoliciesCog(commands.Cog):
             raid_join_window_sec=raid_join_window_sec,
             raid_join_count=raid_join_count,
         )
-        # 캐시 즉시 무효화 이벤트
         self.bot.dispatch("risk_config_updated", itx.guild_id)
 
         r = get_risk_config(itx.guild_id)
@@ -104,20 +109,48 @@ class PoliciesCog(commands.Cog):
             block_everyone_here=block_everyone_here,
             enable_link_filter=enable_link_filter,
         )
-        # 캐시 즉시 무효화 이벤트
         self.bot.dispatch("spam_config_updated", itx.guild_id)
 
         s = get_spam_config(itx.guild_id)
+        wl = s.get("everyone_whitelist", [])
+        wl_txt = ", ".join(f"<@&{rid}>" for rid in wl) if wl else _t(itx.guild_id, "none")
+
         desc = (
             f"{_t(itx.guild_id, 'spamset_ok')}\n"
             f"- Max msgs/10s: {s['max_msgs_per_10s']}\n"
             f"- Max mentions/msg: {s['max_mentions_per_msg']}\n"
             f"- Block @everyone/@here: {'ON' if s['block_everyone_here'] else 'OFF'}\n"
-            f"- Link filter: {'ON' if s['enable_link_filter'] else 'OFF'}\n\n"
+            f"- Link filter: {'ON' if s['enable_link_filter'] else 'OFF'}\n"
+            f"- Whitelist: {wl_txt}\n\n"
             f"{_t(itx.guild_id, 'policy_update_delay')}"
         )
         emb = discord.Embed(title="🛡️ Spam Policy", description=desc, color=0x455A64)
         await itx.response.send_message(embed=emb, ephemeral=True)
+
+    # ========= everyone/here 화이트리스트 =========
+    @app_commands.command(name="spamallow", description="Manage @everyone/@here whitelist / 화이트리스트 관리")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def spamallow(self, itx: discord.Interaction, action: Literal["add", "remove", "list"], role: discord.Role | None = None):
+        action = action.lower()
+        if action == "add" and role:
+            add_spam_whitelist_role(itx.guild_id, role.id)
+            self.bot.dispatch("spam_config_updated", itx.guild_id)
+            msg = _t(itx.guild_id, "spamallow_added", role=role.mention)
+        elif action == "remove" and role:
+            remove_spam_whitelist_role(itx.guild_id, role.id)
+            self.bot.dispatch("spam_config_updated", itx.guild_id)
+            msg = _t(itx.guild_id, "spamallow_removed", role=role.mention)
+        elif action == "list":
+            s = get_spam_config(itx.guild_id)
+            wl = s.get("everyone_whitelist", [])
+            wl_txt = ", ".join(f"<@&{rid}>" for rid in wl) if wl else _t(itx.guild_id, "none")
+            msg = _t(itx.guild_id, "spamallow_list", roles=wl_txt)
+        else:
+            msg = _t(itx.guild_id, "spamallow_hint")
+
+        emb = discord.Embed(title="📝 Whitelist", description=msg, color=0x455A64)
+        await itx.response.send_message(embed=emb, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(PoliciesCog(bot))

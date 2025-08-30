@@ -1,3 +1,4 @@
+# utils/db.py
 import os, json
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -40,6 +41,8 @@ async def init_db():
           data       JSONB NOT NULL
         );
         """)
+        # 조회 빠르게
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_backups_guild ON guild_backups (guild_id, id DESC);")
     _ensure_columns()
 
 def _ensure_columns():
@@ -49,19 +52,45 @@ def _ensure_columns():
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS spam JSONB;")
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS lockdown JSONB;")
         cur.execute("ALTER TABLE guild_config ADD COLUMN IF NOT EXISTS panic JSONB;")
+
         # 기본값 주입
         cur.execute("""UPDATE guild_config
                        SET risk = COALESCE(risk, jsonb_build_object(
-                         'min_account_age_hours', 72, 'raid_join_window_sec', 30, 'raid_join_count', 5));""")
+                         'min_account_age_hours', 72,
+                         'raid_join_window_sec', 30,
+                         'raid_join_count', 5
+                       ));""")
+
         cur.execute("""UPDATE guild_config
                        SET spam = COALESCE(spam, jsonb_build_object(
-                         'max_msgs_per_10s', 8, 'max_mentions_per_msg', 5,
-                         'block_everyone_here', true, 'enable_link_filter', false));""")
+                         'max_msgs_per_10s', 8,
+                         'max_mentions_per_msg', 5,
+                         'block_everyone_here', true,
+                         'enable_link_filter', false
+                       ));""")
+
+        # ✅ everyone_whitelist 키가 없으면 []로 보강
+        cur.execute("""
+        UPDATE guild_config
+        SET spam = jsonb_set(
+          COALESCE(spam, '{}'::jsonb),
+          '{everyone_whitelist}',
+          COALESCE(spam->'everyone_whitelist', '[]'::jsonb),
+          true
+        );
+        """)
+
         cur.execute("""UPDATE guild_config
                        SET lockdown = COALESCE(lockdown, jsonb_build_object(
-                         'enabled', false, 'min_account_age_hours', 72, 'min_guild_age_hours', 24));""")
+                         'enabled', false,
+                         'min_account_age_hours', 72,
+                         'min_guild_age_hours', 24
+                       ));""")
+
         cur.execute("""UPDATE guild_config
-                       SET panic = COALESCE(panic, jsonb_build_object('enabled', false));""")
+                       SET panic = COALESCE(panic, jsonb_build_object(
+                         'enabled', false
+                       ));""")
 
 def upsert_guild(guild_id: int):
     conn = get_conn()
@@ -146,7 +175,7 @@ def set_risk_config(guild_id: int, **kwargs):
             ON CONFLICT (guild_id)
             DO UPDATE SET risk = guild_config.risk || EXCLUDED.risk;
             """,
-            (guild_id, json.dumps(payload)),   # 👈 ::jsonb 캐스팅
+            (guild_id, json.dumps(payload)),
         )
 
 def get_spam_config(guild_id: int) -> dict:
@@ -159,11 +188,15 @@ def get_spam_config(guild_id: int) -> dict:
             "max_mentions_per_msg": 5,
             "block_everyone_here": True,
             "enable_link_filter": False,
+            "everyone_whitelist": [],  # ✅ 기본값
         }
         if not row or not row["spam"]:
             return base
         val = dict(row["spam"])
-        return {**base, **val}
+        # 누락 키 보정
+        for k, v in base.items():
+            val.setdefault(k, v)
+        return val
 
 def set_spam_config(guild_id: int, **kwargs):
     allowed = {
@@ -171,6 +204,7 @@ def set_spam_config(guild_id: int, **kwargs):
         "max_mentions_per_msg",
         "block_everyone_here",
         "enable_link_filter",
+        # intentionally exclude everyone_whitelist here (전용 API로 관리)
     }
     payload = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not payload:
@@ -184,8 +218,38 @@ def set_spam_config(guild_id: int, **kwargs):
             ON CONFLICT (guild_id)
             DO UPDATE SET spam = guild_config.spam || EXCLUDED.spam;
             """,
-            (guild_id, json.dumps(payload)),   # 👈 ::jsonb 캐스팅
+            (guild_id, json.dumps(payload)),
         )
+
+# === everyone/@here 화이트리스트 관리 ===
+def set_spam_whitelist(guild_id: int, role_ids: list[int]):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE guild_config
+            SET spam = jsonb_set(
+              COALESCE(spam,'{}'::jsonb),
+              '{everyone_whitelist}',
+              %s::jsonb,
+              true
+            )
+            WHERE guild_id=%s;
+            """,
+            (json.dumps([int(x) for x in role_ids]), guild_id),
+        )
+
+def add_spam_whitelist_role(guild_id: int, role_id: int):
+    conf = get_spam_config(guild_id)
+    wl = set(int(x) for x in conf.get("everyone_whitelist", []))
+    wl.add(int(role_id))
+    set_spam_whitelist(guild_id, sorted(wl))
+
+def remove_spam_whitelist_role(guild_id: int, role_id: int):
+    conf = get_spam_config(guild_id)
+    wl = set(int(x) for x in conf.get("everyone_whitelist", []))
+    wl.discard(int(role_id))
+    set_spam_whitelist(guild_id, sorted(wl))
 
 def get_lockdown_config(guild_id: int) -> dict:
     conn = get_conn()
@@ -243,6 +307,7 @@ def set_panic_state(guild_id: int, enabled: bool, backup: dict | None):
             (guild_id, json.dumps({"enabled": enabled, "backup": backup})),
         )
 
+# === 백업 API ===
 def save_backup(guild_id: int, label: str | None, data: dict) -> int:
     conn = get_conn()
     with conn.cursor() as cur:
@@ -255,18 +320,22 @@ def save_backup(guild_id: int, label: str | None, data: dict) -> int:
 def list_backups(guild_id: int, limit: int = 10):
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute("""SELECT id, label, created_at
-                       FROM guild_backups
-                       WHERE guild_id=%s
-                       ORDER BY id DESC
-                       LIMIT %s;""", (guild_id, limit))
+        cur.execute("""
+            SELECT id, label, created_at
+            FROM guild_backups
+            WHERE guild_id=%s
+            ORDER BY id DESC
+            LIMIT %s;
+        """, (guild_id, limit))
         return cur.fetchall()
 
 def get_backup(guild_id: int, backup_id: int) -> dict | None:
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute("""SELECT data FROM guild_backups
-                       WHERE guild_id=%s AND id=%s;""", (guild_id, backup_id))
+        cur.execute("""
+            SELECT data FROM guild_backups
+            WHERE guild_id=%s AND id=%s;
+        """, (guild_id, backup_id))
         row = cur.fetchone()
         return dict(row["data"]) if row else None
 

@@ -78,6 +78,11 @@ TEXTS = {
         "restore_done": "✅ 복구 완료!",
         "restore_warn": "⚠️ 일부 항목 복구에 실패했습니다. 로그를 확인해 주세요.",
         "delete_ok": "🧹 백업(ID: {id})을 삭제했어요.",
+        "spamallow_hint": "사용법: `/spamallow add <역할>`, `/spamallow remove <역할>`, `/spamallow list`",
+        "spamallow_added": "{role} 역할을 화이트리스트에 추가했어요.",
+        "spamallow_removed": "{role} 역할을 화이트리스트에서 제거했어요.",
+        "spamallow_list": "화이트리스트: {roles}",
+        "none": "없음",   # 화이트리스트 비어있을 때
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -155,6 +160,11 @@ TEXTS = {
         "restore_done": "✅ Restore completed!",
         "restore_warn": "⚠️ Failed to restore some items. Please check logs.",
         "delete_ok": "🧹 Deleted backup (ID: {id}).",
+        "spamallow_hint": "Usage: `/spamallow add <role>`, `/spamallow remove <role>`, `/spamallow list`",
+        "spamallow_added": "Added {role} to the whitelist.",
+        "spamallow_removed": "Removed {role} from the whitelist.",
+        "spamallow_list": "Whitelist: {roles}",
+        "none": "none",
     },
 }
 

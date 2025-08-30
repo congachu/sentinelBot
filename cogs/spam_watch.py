@@ -89,7 +89,9 @@ class SpamWatchCog(commands.Cog):
         MAX_MENTIONS_PER_MSG = int(s["max_mentions_per_msg"])
         BLOCK_EVERYONE_HERE = bool(s["block_everyone_here"])
         ENABLE_LINK_FILTER = bool(s["enable_link_filter"])
+        WL: list[int] = s.get("everyone_whitelist", [])  # ✅ 화이트리스트
 
+        # ---- 10초당 메시지 속도 제한 ----
         now = time.time()
         gb = _msg_buffer.setdefault(guild_id, {})
         ub = gb.setdefault(message.author.id, [])
@@ -97,20 +99,30 @@ class SpamWatchCog(commands.Cog):
         _msg_buffer[guild_id][message.author.id] = [t for t in ub if now - t <= 10]
 
         if len(_msg_buffer[guild_id][message.author.id]) > MAX_MSGS_PER_10S:
-            await self._delete_and_log(message, "log_spam_reason_rate",
-                                       count=len(_msg_buffer[guild_id][message.author.id]))
+            await self._delete_and_log(
+                message, "log_spam_reason_rate",
+                count=len(_msg_buffer[guild_id][message.author.id])
+            )
             return
 
+        # ---- @everyone/@here 남용 차단 (화이트리스트 면제) ----
         if BLOCK_EVERYONE_HERE and message.mention_everyone:
-            await self._delete_and_log(message, "log_spam_reason_everyone")
-            return
+            author_role_ids = {r.id for r in getattr(message.author, "roles", [])}
+            is_whitelisted = any(rid in author_role_ids for rid in WL)
+            if not is_whitelisted:
+                await self._delete_and_log(message, "log_spam_reason_everyone")
+                return
 
+        # ---- 멘션 폭탄 ----
         total_mentions = len(message.mentions) + len(message.role_mentions)
         if total_mentions > MAX_MENTIONS_PER_MSG:
-            await self._delete_and_log(message, "log_spam_reason_mentions",
-                                       mentions=total_mentions, limit=MAX_MENTIONS_PER_MSG)
+            await self._delete_and_log(
+                message, "log_spam_reason_mentions",
+                mentions=total_mentions, limit=MAX_MENTIONS_PER_MSG
+            )
             return
 
+        # ---- 링크 필터 ----
         if ENABLE_LINK_FILTER:
             content = getattr(message, "content", None)
             if isinstance(content, str) and content:
