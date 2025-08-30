@@ -10,7 +10,8 @@
 - **정책 관리**
   - `/policies` : 정책 확인
   - `/riskset` : 계정 나이·레이드 탐지 임계값 설정
-  - `/spamset` : 스팸·멘션 폭탄·링크 필터 설정
+  - `/spamset` : 스팸·멘션 폭탄·링크 필터 정책 설정
+  - `/spamallow` : @everyone/@here 화이트리스트 관리 (add/remove/list)
   - `/lockdownset` : 신규/의심 계정 차단 임계값 설정
 
 - **신규 유저 감시**
@@ -19,8 +20,8 @@
   - 로그 기록 + DM 안내
 
 - **메시지 감시**
-  - 메시지 속도 제한
-  - 멘션 폭탄 / @everyone 남용 차단
+  - 메시지 속도 제한 (10초 내 메시지 횟수)
+  - 멘션 폭탄 / @everyone 남용 차단 (화이트리스트 예외 지원)
   - 피싱·사기 링크 필터링
 
 - **비상 제어**
@@ -45,6 +46,7 @@
   - `/policies` : View current policies
   - `/riskset` : Configure account age / raid thresholds
   - `/spamset` : Configure spam / mention bomb / link filter
+  - `/spamallow` : Manage @everyone/@here whitelist (add/remove/list)
   - `/lockdownset` : Block suspicious account thresholds
 
 - **Join Watch**
@@ -53,8 +55,8 @@
   - Logs + DM notifications
 
 - **Message Watch**
-  - Rate limit (anti-spam)
-  - Mention bomb / @everyone abuse block
+  - Rate limit (messages in 10s)
+  - Mention bomb / @everyone abuse block (with whitelist exception)
   - Phishing / scam link filtering
 
 - **Admin Controls**
