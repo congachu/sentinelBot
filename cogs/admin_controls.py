@@ -29,27 +29,29 @@ class AdminControls(commands.Cog):
             await itx.response.send_message(_t(guild.id, "panic_already_on"), ephemeral=True)
             return
 
+        # 👇 타임아웃 방지: 즉시 딜레이(에페메랄)
+        await itx.response.defer(ephemeral=True, thinking=True)
+
         backup: dict[str, dict] = {}
-        everyone = _default_role(guild)
+        everyone = guild.default_role
         ok_all = True
 
-        # 텍스트 채널만 대상
         text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
         for ch in text_channels:
             try:
                 ow = ch.overwrites_for(everyone)
-                # 백업: 기존 값(None/True/False)을 기록
                 backup[str(ch.id)] = {"send_messages": ow.send_messages}
-                # 차단
                 ow.send_messages = False
                 await ch.set_permissions(everyone, overwrite=ow, reason="Panic ON")
             except Exception:
                 ok_all = False
 
         set_panic_state(guild.id, True, backup)
-        await itx.response.send_message(_t(guild.id, "panic_on"), ephemeral=True)
+
+        # 👇 followup로 응답
+        await itx.followup.send(_t(guild.id, "panic_on"))
         if not ok_all:
-            await itx.followup.send(_t(guild.id, "panic_partial_warn"), ephemeral=True)
+            await itx.followup.send(_t(guild.id, "panic_partial_warn"))
 
     @app_commands.command(name="unpanic", description="Restore permissions after panic / 패닉 해제 및 권한 원복")
     @app_commands.checks.has_permissions(administrator=True)
@@ -60,8 +62,10 @@ class AdminControls(commands.Cog):
             await itx.response.send_message(_t(guild.id, "panic_already_off"), ephemeral=True)
             return
 
+        await itx.response.defer(ephemeral=True, thinking=True)
+
         backup = state.get("backup") or {}
-        everyone = _default_role(guild)
+        everyone = guild.default_role
         ok_all = True
 
         for ch_id, data in backup.items():
@@ -70,18 +74,15 @@ class AdminControls(commands.Cog):
                 continue
             try:
                 ow = ch.overwrites_for(everyone)
-                # 원래 값으로 복구(None/True/False)
-                prev = data.get("send_messages", None)
-                ow.send_messages = prev
+                ow.send_messages = data.get("send_messages", None)
                 await ch.set_permissions(everyone, overwrite=ow, reason="Panic OFF")
             except Exception:
                 ok_all = False
 
-        # 상태 해제
         set_panic_state(guild.id, False, None)
-        await itx.response.send_message(_t(guild.id, "panic_off"), ephemeral=True)
+        await itx.followup.send(_t(guild.id, "panic_off"))
         if not ok_all:
-            await itx.followup.send(_t(guild.id, "panic_partial_warn"), ephemeral=True)
+            await itx.followup.send(_t(guild.id, "panic_partial_warn"))
 
     # ========= Lockdown =========
     @app_commands.command(name="lockdown", description="Toggle lockdown / 락다운 토글")

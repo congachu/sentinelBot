@@ -36,8 +36,12 @@ class AClient(commands.Bot):
         # 코그 로드
         await init_db()
         for filename in os.listdir("./cogs"):
-            if filename.endswith(".py"):
-                await self.load_extension(f"cogs.{filename[:-3]}")
+            # __init__.py / 언더스코어 시작 파일은 스킵
+            if not filename.endswith(".py"):
+                continue
+            if filename == "__init__.py" or filename.startswith("_"):
+                continue
+            await self.load_extension(f"cogs.{filename[:-3]}")
 
         # 슬래시 동기화 1회
         if not self.synced:

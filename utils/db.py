@@ -1,6 +1,9 @@
 import os, json
 import psycopg2
 from psycopg2.extras import DictCursor
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -151,11 +154,11 @@ def set_risk_config(guild_id: int, **kwargs):
         cur.execute(
             """
             INSERT INTO guild_config (guild_id, risk)
-            VALUES (%s, %s)
+            VALUES (%s, %s::jsonb)
             ON CONFLICT (guild_id)
             DO UPDATE SET risk = guild_config.risk || EXCLUDED.risk;
             """,
-            (guild_id, json.dumps(payload)),
+            (guild_id, json.dumps(payload)),   # 👈 ::jsonb 캐스팅
         )
 
 def get_spam_config(guild_id: int) -> dict:
@@ -189,11 +192,11 @@ def set_spam_config(guild_id: int, **kwargs):
         cur.execute(
             """
             INSERT INTO guild_config (guild_id, spam)
-            VALUES (%s, %s)
+            VALUES (%s, %s::jsonb)
             ON CONFLICT (guild_id)
             DO UPDATE SET spam = guild_config.spam || EXCLUDED.spam;
             """,
-            (guild_id, json.dumps(payload)),
+            (guild_id, json.dumps(payload)),   # 👈 ::jsonb 캐스팅
         )
 
 def get_lockdown_config(guild_id: int) -> dict:
@@ -221,7 +224,7 @@ def set_lockdown_config(guild_id: int, **kwargs):
         cur.execute(
             """
             INSERT INTO guild_config (guild_id, lockdown)
-            VALUES (%s, %s)
+            VALUES (%s, %s::jsonb)
             ON CONFLICT (guild_id)
             DO UPDATE SET lockdown = guild_config.lockdown || EXCLUDED.lockdown;
             """,
