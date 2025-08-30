@@ -106,6 +106,7 @@ TEXTS = {
         "audit_backups_none": "백업 없음",
         "audit_backups_some": "{count}개 존재 (최근: {latest})",
         "audit_footer_hint": "정책 변경 후 적용까지 최대 10초가 걸릴 수 있어요.",
+        "help_cat_audit": "보안 점검",
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -211,6 +212,7 @@ TEXTS = {
         "audit_backups_none": "No backups found",
         "audit_backups_some": "{count} found (latest: {latest})",
         "audit_footer_hint": "Policy updates may take up to 10 seconds to propagate.",
+        "help_cat_audit": "Security Audit",
     },
 }
 

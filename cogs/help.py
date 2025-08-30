@@ -19,7 +19,7 @@ CATEGORIES = {
         ("riskset", "Slash"),
         ("spamset", "Slash"),
         ("lockdownset", "Slash"),
-        ("spamallow", "Group"),  # ✅ 화이트리스트 그룹 명령 추가
+        ("spamallow", "Group"),  # ✅ 화이트리스트 그룹 명령
     ],
     "admin": [
         ("lockdown", "Slash"),
@@ -31,6 +31,9 @@ CATEGORIES = {
         ("backup_list", "Slash"),
         ("backup_delete", "Slash"),
         ("backup_restore", "Slash"),
+    ],
+    "audit": [  # ✅ 보안 점검 카테고리 추가
+        ("security_audit", "Slash"),
     ],
 }
 
@@ -45,9 +48,9 @@ def _command_lookup(bot: commands.Bot) -> dict[str, app_commands.Command]:
     for cmd in bot.tree.get_commands():
         table[cmd.name] = cmd
         if isinstance(cmd, app_commands.Group):
-            # 그룹 자체도 키로 등록
+            # 그룹 하위 커맨드도 키로 등록 (예: "spamallow add")
             for sub in cmd.commands:
-                table[f"{cmd.name} {sub.name}"] = sub  # 예: "spamallow add"
+                table[f"{cmd.name} {sub.name}"] = sub
     return table
 
 
@@ -87,7 +90,6 @@ class HelpCog(commands.Cog):
             if getattr(cmd, "parameters", None):
                 desc_lines.append(_t(guild_id, "help_command_usage"))
                 for p in cmd.parameters:
-                    # discord.py 내부 MISSING 비교 안전 처리
                     required = getattr(p, "required", False)
                     opt_txt = _t(guild_id, "help_required") if required else _t(guild_id, "help_optional")
                     desc_lines.append(f"- `{p.name}` ({opt_txt}) — {p.description or '-'}")
@@ -111,10 +113,11 @@ class HelpCog(commands.Cog):
                 "spamallow add": "/spamallow add @Trusted",
                 "spamallow remove": "/spamallow remove @Trusted",
                 "spamallow list": "/spamallow list",
+                # ✅ 보안 점검 예시
+                "security_audit": "/security_audit",
             }
             sample = examples.get(key) or examples.get(cmd.name)
             if sample:
-                # 여러 줄 예시는 그대로 표시
                 for line in str(sample).splitlines():
                     desc_lines.append(f"• `{line}`")
 
@@ -140,6 +143,7 @@ class HelpCog(commands.Cog):
             "policies": _t(guild_id, "help_cat_policies"),
             "admin": _t(guild_id, "help_cat_admin"),
             "backup": _t(guild_id, "help_cat_backup"),
+            "audit": _t(guild_id, "help_cat_audit"),  # ✅ 라벨 추가
         }
 
         # 실제 등록된 명령만 뽑아 표시
@@ -147,13 +151,13 @@ class HelpCog(commands.Cog):
         for key, items in CATEGORIES.items():
             present = []
             for name, kind in items:
-                if name not in table:
-                    continue
+                # 그룹 루트 키 존재 검사 (예: spamallow)
                 if kind == "Group":
-                    # 그룹은 add|remove|list 를 안내에 함께 표시
-                    present.append(f"`/{name} add|remove|list` — {table[name].description or '-'}")
+                    if name in table:
+                        present.append(f"`/{name} add|remove|list` — {table[name].description or '-'}")
                 else:
-                    present.append(f"`/{name}` — {table[name].description or '-'}")
+                    if name in table:
+                        present.append(f"`/{name}` — {table[name].description or '-'}")
             if present:
                 emb.add_field(name=labels[key], value="\n".join(present), inline=False)
 
