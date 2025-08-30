@@ -3,6 +3,7 @@ import re
 import time
 import discord
 from discord.ext import commands
+from urllib.parse import urlparse  # ✅ 도메인 판별용
 
 from utils.db import get_log_channel, get_spam_config
 from utils.i18n import t as _t
@@ -122,15 +123,31 @@ class SpamWatchCog(commands.Cog):
             )
             return
 
-        # ---- 링크 필터 ----
+        # ---- 링크 필터 (공식 discord.gift 허용 / 사칭·피싱 차단) ----
         if ENABLE_LINK_FILTER:
             content = getattr(message, "content", None)
             if isinstance(content, str) and content:
-                if LINK_RE.search(content):
-                    lower = content.lower()
-                    if any(bad in lower for bad in ("discordgift", "discord-airdrop", "nitrodrop", "grabfree", "t.me")):
-                        await self._delete_and_log(message, "log_spam_reason_link")
-                        return
+                # 메시지 내 URL만 뽑아서 도메인 단위로 판정
+                urls = LINK_RE.findall(content)
+                if urls:
+                    PHISHING_KEYWORDS = ("discord-airdrop", "nitrodrop", "grabfree")
+                    for url in urls:
+                        lower = url.lower()
+                        parsed = urlparse(url)
+                        host = (parsed.netloc or "").lower()
+
+                        # ✅ 공식 Nitro 기프트 도메인은 허용
+                        if host == "discord.gift":
+                            continue
+
+                        # 🚫 피싱/사칭 패턴
+                        if (
+                            "discordgift" in host                       # discordgift.* 사칭 도메인
+                            or host == "t.me"                            # 텔레그램 초대/피싱
+                            or any(k in lower for k in PHISHING_KEYWORDS)  # 기타 키워드
+                        ):
+                            await self._delete_and_log(message, "log_spam_reason_link")
+                            return
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
