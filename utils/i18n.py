@@ -28,7 +28,7 @@ TEXTS = {
             "**Risk**\n"
             "- 계정 최소 나이: {min_age}h\n- 레이드 판정: {raid_count}명/{raid_win}s\n\n"
             "**Spam**\n"
-            "- 10초 최대 메시지: {max_msgs}\n- 1메시지 최대 멘션: {max_mentions}\n"
+            "- 10초 최대 메시지: {max_msgs}\n- 메시지당 최대 멘션: {max_mentions}\n"
             "- @everyone/@here 차단: {block_eh}\n- 링크 필터: {link_filter}"
         ),
         "riskset_ok": "✅ Risk 정책이 업데이트되었습니다.",

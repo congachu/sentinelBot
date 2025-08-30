@@ -37,10 +37,10 @@ class PoliciesCog(commands.Cog):
             link_filter=_t(itx.guild_id, "bool_on") if s["enable_link_filter"] else _t(itx.guild_id, "bool_off"),
         )
         body += (
-            f"\n{_t(itx.guild_id, 'lockdown_title')}\n"
-            f"{_t(itx.guild_id, 'lockdown_enabled', state=_t(itx.guild_id, 'bool_on') if l['enabled'] else _t(itx.guild_id, 'bool_off'))}\n"
-            f"{_t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
-            f"{_t(itx.guild_id, 'lockdown_min_guild_age', hours=l['min_guild_age_hours'])}"
+            f"\n\n{_t(itx.guild_id, 'lockdown_title')}\n"
+            f"- {_t(itx.guild_id, 'lockdown_enabled', state=_t(itx.guild_id, 'bool_on') if l['enabled'] else _t(itx.guild_id, 'bool_off'))}\n"
+            f"- {_t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
+            f"- {_t(itx.guild_id, 'lockdown_min_guild_age', hours=l['min_guild_age_hours'])}"
         )
 
         emb = discord.Embed(title=_t(itx.guild_id, "policies_title"), description=body, color=0x546E7A)
