@@ -4,126 +4,151 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import datetime
 
 from utils.db import (
-    get_log_channel,
-    get_lang,
-    get_risk_config,
-    get_spam_config,
-    get_lockdown_config,
-    get_panic_state,
+    get_log_channel, get_lang,
+    get_risk_config, get_spam_config,
+    get_lockdown_config, get_panic_state,
     list_backups,
 )
 from utils.i18n import t as _t
 
 
-def _bool_txt(gid: int, b: bool) -> str:
-    return _t(gid, "bool_on") if b else _t(gid, "bool_off")
-
-
 class SecurityAuditCog(commands.Cog):
-    """보안 점검 리포트"""
+    """서버 보안 설정 점검 + 보안 점수 산출"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="security_audit", description="Run a security audit / 보안 점검 보고서")
+    @app_commands.command(name="security_audit", description="Security audit with a score / 보안 점검(점수 포함)")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def security_audit(self, itx: discord.Interaction):
         gid = itx.guild_id
-        g = itx.guild
-        await itx.response.defer(ephemeral=True)
+        assert gid is not None
 
-        # --- Gather ---
-        log_ch_id = get_log_channel(gid)
+        await itx.response.defer(ephemeral=True, thinking=True)
+
+        # ---- Load configs
+        log_ch = get_log_channel(gid)
         lang = get_lang(gid)
         risk = get_risk_config(gid)
         spam = get_spam_config(gid)
         lockdown = get_lockdown_config(gid)
         panic = get_panic_state(gid)
-        backups = list_backups(gid, limit=5)
+        backups = list_backups(gid, limit=1)
 
-        # Mentions
-        log_ch_txt = f"<#{log_ch_id}>" if log_ch_id else _t(gid, "none")
-        wl = spam.get("everyone_whitelist", []) or []
-        wl_txt = ", ".join(f"<@&{rid}>" for rid in wl) if wl else _t(gid, "none")
+        # ---- Score calc (0~100)
+        score = 0
+        details: list[str] = []
 
-        # Latest backup text
-        if backups:
-            latest = backups[0]["created_at"]
-            # created_at은 timezone-aware일 가능성 → 보기 좋게 포맷
-            if isinstance(latest, datetime):
-                latest_txt = latest.strftime("%Y-%m-%d %H:%M")
-            else:
-                latest_txt = str(latest)
-            backups_txt = _t(gid, "audit_backups_some", count=len(backups), latest=latest_txt)
+        # Emojis
+        OK = "✅"
+        WARN = "⚠️"
+        BAD = "❌"
+
+        # 1) Log channel (15)
+        if log_ch:
+            score += 15
+            details.append(f"{OK} " + _t(gid, "audit_line_log_set"))
         else:
-            backups_txt = _t(gid, "audit_backups_none")
+            details.append(f"{BAD} " + _t(gid, "audit_line_log_missing"))
 
-        # --- Build embed ---
+        # 2) Language sanity (5)
+        if lang in ("ko", "en"):
+            score += 5
+            # 굳이 라인 출력은 생략
+
+        # 3) Risk (20)
+        #   - min account age >= 72h → 10
+        #   - raid detection (count >=3 AND window <= 60s) → 10
+        if int(risk.get("min_account_age_hours", 0)) >= 72:
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_age_ok"))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_age_low", hours=risk.get("min_account_age_hours", 0)))
+
+        if int(risk.get("raid_join_count", 0)) >= 3 and int(risk.get("raid_join_window_sec", 9999)) <= 60:
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_raid_ok"))
+        else:
+            details.append(
+                f"{WARN} "
+                + _t(
+                    gid,
+                    "audit_line_raid_weak",
+                    count=risk.get("raid_join_count", 0),
+                    sec=risk.get("raid_join_window_sec", 0),
+                )
+            )
+
+        # 4) Spam (35)
+        #   - rate limit <=10 → 10
+        #   - mentions limit <=10 → 10
+        #   - block everyone/here ON → 10
+        #   - link filter ON → 5
+        rate = int(spam.get("max_msgs_per_10s", 999))
+        if rate <= 10:
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_rate_ok", limit=rate))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_rate_bad", limit=rate))
+
+        mentions_lim = int(spam.get("max_mentions_per_msg", 999))
+        if mentions_lim <= 10:
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_mentions_ok", limit=mentions_lim))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_mentions_bad", limit=mentions_lim))
+
+        if bool(spam.get("block_everyone_here", False)):
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_block_everyone_on"))
+        else:
+            details.append(f"{BAD} " + _t(gid, "audit_line_block_everyone_off"))
+
+        if bool(spam.get("enable_link_filter", False)):
+            score += 5
+            details.append(f"{OK} " + _t(gid, "audit_line_link_on"))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_link_off"))
+
+        # 5) Lockdown (10) — 켜져 있으면 +10 (평시 OFF는 감점 없음, 정보 라인만)
+        if bool(lockdown.get("enabled", False)):
+            score += 10
+            details.append(f"{OK} " + _t(gid, "audit_line_lockdown_on"))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_lockdown_off_note"))
+
+        # 6) Backups exist (5)
+        if backups:
+            score += 5
+            details.append(f"{OK} " + _t(gid, "audit_line_backups_some"))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_backups_none"))
+
+        # 7) Panic OFF (5)
+        if not bool(panic.get("enabled", False)):
+            score += 5
+            details.append(f"{OK} " + _t(gid, "audit_line_panic_off"))
+        else:
+            details.append(f"{WARN} " + _t(gid, "audit_line_panic_on"))
+
+        # ---- Build embed
         title = _t(gid, "audit_title")
-        emb = discord.Embed(title=title, color=0x2E7D32)
+        emb = discord.Embed(title=title, color=0x546E7A)
 
-        # Header section
+        emb.add_field(
+            name=_t(gid, "audit_score_title"),
+            value=_t(gid, "audit_score_line", score=score),
+            inline=False,
+        )
+
+        # 한 번에 보기 쉽게 본문 묶기
         emb.add_field(
             name=_t(gid, "audit_header"),
-            value=(
-                f"• {_t(gid, 'audit_log_channel')}: {log_ch_txt}\n"
-                f"• {_t(gid, 'audit_language')}: {('한국어' if lang == 'ko' else 'English')}"
-            ),
+            value="\n".join(details),
             inline=False,
         )
-
-        # Risk
-        emb.add_field(
-            name=_t(gid, "audit_section_risk"),
-            value=(
-                f"- {_t(gid, 'audit_min_account_age')}: {risk['min_account_age_hours']}h\n"
-                f"- {_t(gid, 'audit_raid_detection')}: {risk['raid_join_count']} / {risk['raid_join_window_sec']}s"
-            ),
-            inline=False,
-        )
-
-        # Spam
-        emb.add_field(
-            name=_t(gid, "audit_section_spam"),
-            value=(
-                f"- {_t(gid, 'audit_rate_limit')}: {spam['max_msgs_per_10s']} / 10s\n"
-                f"- {_t(gid, 'audit_mentions_limit')}: {spam['max_mentions_per_msg']} / msg\n"
-                f"- {_t(gid, 'audit_block_everyone')}: {_bool_txt(gid, spam['block_everyone_here'])}\n"
-                f"- {_t(gid, 'audit_link_filter')}: {_bool_txt(gid, spam['enable_link_filter'])}\n"
-                f"- {_t(gid, 'audit_whitelist')}: {wl_txt}"
-            ),
-            inline=False,
-        )
-
-        # Lockdown
-        emb.add_field(
-            name=_t(gid, "audit_section_lockdown"),
-            value=(
-                f"- {_t(gid, 'audit_lockdown_enabled')}: {_bool_txt(gid, lockdown['enabled'])}\n"
-                f"- {_t(gid, 'audit_lockdown_min_account')}: {lockdown['min_account_age_hours']}h\n"
-                f"- {_t(gid, 'audit_lockdown_min_guild')}: {lockdown['min_guild_age_hours']}h"
-            ),
-            inline=False,
-        )
-
-        # Panic
-        emb.add_field(
-            name=_t(gid, "audit_section_panic"),
-            value=f"- {_t(gid, 'audit_panic_status')}: {_bool_txt(gid, panic['enabled'])}",
-            inline=False,
-        )
-
-        # Backups
-        emb.add_field(
-            name=_t(gid, "audit_section_backups"),
-            value=backups_txt,
-            inline=False,
-        )
-
-        # Footer with hint
         emb.set_footer(text=_t(gid, "audit_footer_hint"))
 
         await itx.followup.send(embed=emb, ephemeral=True)
