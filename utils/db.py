@@ -311,11 +311,36 @@ def set_panic_state(guild_id: int, enabled: bool, backup: dict | None):
 def save_backup(guild_id: int, label: str | None, data: dict) -> int:
     conn = get_conn()
     with conn.cursor() as cur:
+        # 1) 새 백업 저장
         cur.execute(
-            "INSERT INTO guild_backups (guild_id, label, data) VALUES (%s, %s, %s::jsonb) RETURNING id;",
+            """
+            INSERT INTO guild_backups (guild_id, label, data)
+            VALUES (%s, %s, %s::jsonb)
+            RETURNING id;
+            """,
             (guild_id, label, json.dumps(data)),
         )
-        return cur.fetchone()["id"]
+        new_id = cur.fetchone()["id"]
+
+        # 2) 길드당 최신 3개만 유지 (나머지 삭제)
+        cur.execute(
+            """
+            DELETE FROM guild_backups g
+            USING (
+              SELECT id
+              FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (PARTITION BY guild_id ORDER BY id DESC) AS rn
+                FROM guild_backups
+                WHERE guild_id = %s
+              ) t
+              WHERE t.rn > 3
+            ) old
+            WHERE g.id = old.id;
+            """,
+            (guild_id,),
+        )
+        return new_id
 
 def list_backups(guild_id: int, limit: int = 10):
     conn = get_conn()
