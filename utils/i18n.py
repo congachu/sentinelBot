@@ -107,6 +107,14 @@ TEXTS = {
         "audit_backups_some": "{count}개 존재 (최근: {latest})",
         "audit_footer_hint": "정책 변경 후 적용까지 최대 10초가 걸릴 수 있어요.",
         "help_cat_audit": "보안 점검",
+        "log_mod_title": "Moderation Action",
+        "dm_mod_notice": "서버 정책 위반으로 {action} 조치되었습니다. 사유: {reason}",
+
+        "enforce_title": "Enforcement",
+        "enforce_mode": "모드",
+        "enforce_ban_days": "밴 시 메시지 삭제(일)",
+        "enforce_reason": "사유",
+        "enforceset_ok": "자동 제재 정책이 업데이트되었습니다."
     },
     "en": {
         "setlog_ok": "✅ Log channel set to {channel}.",
@@ -213,6 +221,14 @@ TEXTS = {
         "audit_backups_some": "{count} found (latest: {latest})",
         "audit_footer_hint": "Policy updates may take up to 10 seconds to propagate.",
         "help_cat_audit": "Security Audit",
+        "log_mod_title": "Moderation Action",
+        "dm_mod_notice": "You have been {action} due to a policy violation. Reason: {reason}",
+
+        "enforce_title": "Enforcement",
+        "enforce_mode": "Mode",
+        "enforce_ban_days": "Ban delete days",
+        "enforce_reason": "Reason",
+        "enforceset_ok": "Auto moderation policy updated."
     },
 }
 
