@@ -162,10 +162,22 @@ class HelpCog(commands.Cog):
                 emb.add_field(name=labels[key], value="\n".join(present), inline=False)
 
         emb.add_field(
+            name=_t(guild_id, "help_auto_enforce_title"),
+            value="\n".join([
+                f"- {_t(guild_id, 'auto_enforce_rule_rate_link')}",
+                f"- {_t(guild_id, 'auto_enforce_rule_everyone')}",
+                f"- {_t(guild_id, 'auto_enforce_rule_join')}",
+            ]),
+            inline=False,
+        )
+
+        emb.add_field(
             name=_t(guild_id, "help_tips_title"),
             value=_t(guild_id, "help_tips_body"),
             inline=False,
         )
+
+
         emb.set_footer(text=_t(guild_id, "help_footer"))
 
         await itx.followup.send(embed=emb, ephemeral=True)

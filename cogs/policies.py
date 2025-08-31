@@ -48,6 +48,12 @@ class PoliciesCog(commands.Cog):
             f"- {_t(itx.guild_id, 'lockdown_min_age', hours=l['min_account_age_hours'])}\n"
             f"- {_t(itx.guild_id, 'lockdown_min_guild_age', hours=l['min_guild_age_hours'])}"
         )
+        body += (
+            f"\n\n**{_t(itx.guild_id, 'auto_enforce_title')}**\n"
+            f"- {_t(itx.guild_id, 'auto_enforce_rule_rate_link')}\n"
+            f"- {_t(itx.guild_id, 'auto_enforce_rule_everyone')}\n"
+            f"- {_t(itx.guild_id, 'auto_enforce_rule_join')}"
+        )
 
         emb = discord.Embed(title=_t(itx.guild_id, "policies_title"), description=body, color=0x546E7A)
         await itx.response.send_message(embed=emb, ephemeral=True)

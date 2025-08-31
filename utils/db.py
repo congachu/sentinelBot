@@ -379,36 +379,3 @@ def delete_backup(guild_id: int, backup_id: int) -> bool:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM guild_backups WHERE guild_id=%s AND id=%s;", (guild_id, backup_id))
         return cur.rowcount > 0
-
-# === 자동 제재 정책(enforce) ===
-def get_enforce_config(guild_id: int) -> dict:
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("SELECT enforce FROM guild_config WHERE guild_id=%s;", (guild_id,))
-        row = cur.fetchone()
-        base = {"action": "none", "ban_delete_days": 0, "reason": "Violation: spam/policy"}
-        if not row or not row["enforce"]:
-            return base
-        val = dict(row["enforce"])
-        # 누락 키 보정
-        for k, v in base.items():
-            val.setdefault(k, v)
-        return val
-
-def set_enforce_config(guild_id: int, **kwargs):
-    allowed = {"action", "ban_delete_days", "reason"}
-    payload = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
-    if not payload:
-        return
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO guild_config (guild_id, enforce)
-            VALUES (%s, %s::jsonb)
-            ON CONFLICT (guild_id)
-            DO UPDATE SET enforce = guild_config.enforce || EXCLUDED.enforce;
-            """,
-            (guild_id, json.dumps(payload)),
-        )
-
