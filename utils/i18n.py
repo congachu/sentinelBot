@@ -83,6 +83,7 @@ TEXTS = {
         "spamallow_removed": "{role} 역할을 화이트리스트에서 제거했어요.",
         "spamallow_list": "화이트리스트: {roles}",
         "none": "없음",   # 화이트리스트 비어있을 때
+        "audit_title": "🔒 보안 점검 보고서",
         "audit_score_title": "보안 점수",
         "audit_score_line": "{score} / 100",
         "audit_line_log_set": "로그 채널이 설정됨",
@@ -212,6 +213,7 @@ TEXTS = {
         "spamallow_removed": "Removed {role} from the whitelist.",
         "spamallow_list": "Whitelist: {roles}",
         "none": "none",
+        "audit_title": "🔒 Security Audit Report",
         "audit_score_title": "Security Score",
         "audit_score_line": "{score} / 100",
         "audit_line_log_set": "Log channel is set",
