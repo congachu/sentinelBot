@@ -1,9 +1,11 @@
 # cogs/join_watch.py
+from __future__ import annotations
+
 import time
 import discord
 from discord.ext import commands
 
-from utils.db import get_log_channel, get_risk_config
+from utils.db import get_log_channel, get_risk_config, get_enforce_config
 from utils.i18n import t as _t
 
 # 최근 입장 버퍼 & DM 쿨다운
@@ -30,8 +32,9 @@ def invalidate_risk_conf(guild_id: int | None = None):
     else:
         _risk_cache.pop(guild_id, None)
 
+
 class JoinWatchCog(commands.Cog):
-    """신규 유저 입장 위험 신호 감지 & 로그"""
+    """신규 유저 입장 위험 신호 감지 & 로그 (+ 레이드+저연령 즉시 킥)"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -64,6 +67,51 @@ class JoinWatchCog(commands.Cog):
         except Exception:
             pass
 
+    async def _kick_raid_young(self, member: discord.Member, *, acct_age_hours: float,
+                               join_count: int, window_sec: int):
+        """레이드 확정 + 저연령 계정 → 정책이 ban이어도 '킥'으로만 처리"""
+        guild = member.guild
+        me: discord.Member = guild.me  # type: ignore
+        if member == guild.owner or member.top_role >= me.top_role:
+            return
+        if not me.guild_permissions.kick_members:
+            return
+
+        e = get_enforce_config(guild.id)  # reason 재사용
+        # 사유 구성: 정책 reason + (레이드/저연령 설명)
+        rule_reason = (
+            _t(guild.id, "log_join_reason_raid", count=join_count, sec=window_sec)
+            + " | "
+            + _t(guild.id, "log_join_reason_new", hours=f"{acct_age_hours:.1f}")
+        )
+        final_reason = f"{(e.get('reason') or 'Violation')} | {rule_reason}"
+
+        # DM 안내
+        try:
+            await member.send(_t(guild.id, "dm_mod_notice", action="KICK", reason=rule_reason))
+        except Exception:
+            pass
+
+        # 킥 실행
+        try:
+            await member.kick(reason=final_reason)
+        except Exception:
+            pass
+
+        # 제재 로그
+        emb = discord.Embed(
+            title=_t(guild.id, "log_mod_title"),
+            color=0xEF6C00,
+            description=(
+                f"**Action:** KICK\n"
+                f"**User:** {member.mention} (`{member}`)\n"
+                f"**Reason:** {final_reason}"
+            ),
+        )
+        if member.display_avatar:
+            emb.set_thumbnail(url=member.display_avatar.url)
+        await self._send_log(guild, emb)
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         if member.bot:
@@ -77,10 +125,12 @@ class JoinWatchCog(commands.Cog):
 
         reasons = []
 
+        # 계정 나이
         acct_age_hours = ((discord.utils.utcnow() - member.created_at).total_seconds() / 3600)
         if acct_age_hours < MIN_ACCOUNT_AGE_HOURS:
             reasons.append("new_account")
 
+        # 레이드 급증 감지
         now = time.time()
         buf = _recent_joins.setdefault(guild.id, [])
         buf.append(now)
@@ -89,6 +139,16 @@ class JoinWatchCog(commands.Cog):
         if join_count >= RAID_JOIN_COUNT:
             reasons.append("raid_surge")
 
+        # 레이드 + 저연령 → 즉시 킥 (정책이 ban이어도 킥으로만)
+        if "raid_surge" in reasons and acct_age_hours < MIN_ACCOUNT_AGE_HOURS:
+            await self._kick_raid_young(
+                member,
+                acct_age_hours=acct_age_hours,
+                join_count=join_count,
+                window_sec=RAID_JOIN_WINDOW_SEC,
+            )
+
+        # 로그/DM (정보 전달은 계속 수행)
         if not reasons:
             return
 
@@ -120,6 +180,7 @@ class JoinWatchCog(commands.Cog):
         sent = await self._send_log(guild, emb)
         if not sent:
             await self._notify_owner_if_no_log(guild)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(JoinWatchCog(bot))

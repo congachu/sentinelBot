@@ -1,21 +1,28 @@
 # cogs/spam_watch.py
+from __future__ import annotations
+
 import re
 import time
+from urllib.parse import urlparse
+
 import discord
 from discord.ext import commands
-from urllib.parse import urlparse  # ✅ 도메인 판별용
 
-from utils.db import get_log_channel, get_spam_config
+from utils.db import get_log_channel, get_spam_config, get_enforce_config
 from utils.i18n import t as _t
 
+# -------------------------------
+# Constants / Regex
+# -------------------------------
 LINK_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
-# 길드별 유저 메시지 타임스탬프 버퍼
-_msg_buffer: dict[int, dict[int, list[float]]] = {}  # {guild_id: {user_id: [ts,...]}}
+# 메시지 속도 제한(도배) 측정 버퍼: {guild_id: {user_id: [ts,...]}}
+_msg_buffer: dict[int, dict[int, list[float]]] = {}
 
 # ---- 정책 캐시 (TTL=10초) ----
 CACHE_TTL = 10
-_spam_cache: dict[int, tuple[float, dict]] = {}  # guild_id -> (expires_ts, conf)
+_spam_cache: dict[int, tuple[float, dict]] = {}      # guild_id -> (expires_ts, conf)
+_enforce_cache: dict[int, tuple[float, dict]] = {}   # guild_id -> (expires_ts, conf)
 
 def get_spam_conf_cached(guild_id: int):
     now = time.time()
@@ -26,14 +33,90 @@ def get_spam_conf_cached(guild_id: int):
     _spam_cache[guild_id] = (now + CACHE_TTL, conf)
     return conf
 
+def get_enforce_conf_cached(guild_id: int):
+    now = time.time()
+    hit = _enforce_cache.get(guild_id)
+    if hit and hit[0] > now:
+        return hit[1]
+    conf = get_enforce_config(guild_id)  # {action, ban_delete_days, reason}
+    _enforce_cache[guild_id] = (now + CACHE_TTL, conf)
+    return conf
+
 def invalidate_spam_conf(guild_id: int | None = None):
     if guild_id is None:
         _spam_cache.clear()
     else:
         _spam_cache.pop(guild_id, None)
 
+def invalidate_enforce_conf(guild_id: int | None = None):
+    if guild_id is None:
+        _enforce_cache.clear()
+    else:
+        _enforce_cache.pop(guild_id, None)
+
+# -------------------------------
+# Escalation policy (요청 사양)
+# -------------------------------
+# 도배/피싱 링크: "임계값 위반을 1회 달성한 이후" → 추가로 10회 더 위반 시 제재 (총 11회부터)
+EXTRA_VIOLATIONS_TO_BAN = 10
+OVERAGE_RESET_WINDOW_SEC = 1800  # 30분 동안 추가 위반 없으면 카운터 자동 리셋
+
+# everyone/here 남용: 2분 내 3회 위반 시 제재
+SEV_EVERYONE_WINDOW = 120.0
+SEV_EVERYONE_COUNT = 3
+
+# overage 카운터: {gid:{uid:{kind:{'count':int,'first_ts':float}}}}  kind: 'rate' | 'link'
+_overage: dict[int, dict[int, dict[str, dict]]] = {}
+
+# everyone 반복 카운터: {gid:{uid:{'everyone':[ts,...]}}}
+_violations: dict[int, dict[int, dict[str, list[float]]]] = {}
+
+
+def _bump_overage(gid: int, uid: int, kind: str) -> bool:
+    """
+    kind: 'rate' | 'link'
+    임계값 '추가' 위반 누적. 30분 이내로 EXTRA_VIOLATIONS_TO_BAN 달성 시 True 반환.
+    True일 때 상위 로직에서 제재 실행.
+    """
+    now = time.time()
+    g = _overage.setdefault(gid, {})
+    u = g.setdefault(uid, {})
+    s = u.setdefault(kind, {"count": 0, "first_ts": now})
+
+    # 30분 경과 시 리셋
+    if now - s["first_ts"] > OVERAGE_RESET_WINDOW_SEC:
+        s["count"] = 0
+        s["first_ts"] = now
+
+    s["count"] += 1
+    if s["count"] >= EXTRA_VIOLATIONS_TO_BAN:
+        # 달성 후 리셋
+        s["count"] = 0
+        s["first_ts"] = now
+        return True
+    return False
+
+
+async def _escalate_everyone_if_needed(message: discord.Message) -> bool:
+    """2분 내 3회 everyone/here 위반이면 True."""
+    gid, uid = message.guild.id, message.author.id
+    now = time.time()
+    v_g = _violations.setdefault(gid, {})
+    v_u = v_g.setdefault(uid, {})
+    arr = v_u.setdefault("everyone", [])
+    arr.append(now)
+    # 윈도우 트림
+    arr[:] = [t for t in arr if now - t <= SEV_EVERYONE_WINDOW]
+    if len(arr) >= SEV_EVERYONE_COUNT:
+        arr.clear()
+        return True
+    return False
+
+
 class SpamWatchCog(commands.Cog):
-    """스팸·멘션 폭탄·홍보/피싱 링크 감지"""
+    """스팸·멘션 폭탄·@everyone/@here 남용·피싱 링크 감지
+       제재는 '명백/지속 위반'에서만 에스컬레이션으로 실행한다.
+    """
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -43,6 +126,13 @@ class SpamWatchCog(commands.Cog):
     async def on_spam_config_updated(self, guild_id: int):
         invalidate_spam_conf(guild_id)
 
+    @commands.Cog.listener()
+    async def on_enforce_config_updated(self, guild_id: int):
+        invalidate_enforce_conf(guild_id)
+
+    # -------------------------------
+    # Logging helpers
+    # -------------------------------
     async def _send_log(self, guild: discord.Guild, embed: discord.Embed) -> bool:
         ch_id = get_log_channel(guild.id)
         if not ch_id:
@@ -54,11 +144,13 @@ class SpamWatchCog(commands.Cog):
         return False
 
     async def _delete_and_log(self, message: discord.Message, reason_key: str, **fmt):
+        # 삭제
         try:
             await message.delete()
         except Exception:
             pass
 
+        # 로그
         emb = discord.Embed(
             title=_t(message.guild.id, "log_spam_title"),
             color=0xE53935,
@@ -73,48 +165,117 @@ class SpamWatchCog(commands.Cog):
         emb.set_footer(text=_t(message.guild.id, "log_spam_footer_config"))
         await self._send_log(message.guild, emb)
 
+        # DM 통지(실패 무시)
         try:
             await message.author.send(_t(message.guild.id, "dm_spam_notice"))
         except Exception:
             pass
 
+    # -------------------------------
+    # Moderation (kick/ban) - only for severe/confirm cases
+    # -------------------------------
+    async def _moderate_user(self, message: discord.Message, reason_i18n_key: str, **fmt):
+        """심각 위반 확정 시에만 킥/밴 실행."""
+        guild = message.guild
+        member: discord.Member = message.author  # type: ignore
+        e = get_enforce_conf_cached(guild.id)
+        action = (e.get("action") or "none").lower()
+        if action == "none":
+            return
+
+        me: discord.Member = guild.me  # type: ignore
+        # 위계/권한 안전장치
+        if member == guild.owner:
+            return
+        if member.top_role >= me.top_role:
+            return
+        if action == "kick" and not me.guild_permissions.kick_members:
+            return
+        if action == "ban" and not me.guild_permissions.ban_members:
+            return
+
+        human_reason = e.get("reason") or "Violation"
+        rule_reason = _t(guild.id, reason_i18n_key, **fmt)
+        final_reason = f"{human_reason} | {rule_reason}"
+
+        # DM 고지
+        try:
+            await member.send(_t(guild.id, "dm_mod_notice", action=action.upper(), reason=rule_reason))
+        except Exception:
+            pass
+
+        # 실행
+        if action == "kick":
+            try:
+                await member.kick(reason=final_reason)
+            except Exception:
+                pass
+        elif action == "ban":
+            days = int(e.get("ban_delete_days") or 0)
+            try:
+                await guild.ban(member, reason=final_reason, delete_message_days=days)
+            except Exception:
+                pass
+
+        # 제재 로그
+        col = 0xC62828 if action == "ban" else 0xEF6C00
+        emb = discord.Embed(
+            title=_t(guild.id, "log_mod_title"),
+            color=col,
+            description=(
+                f"**Action:** {action.upper()}\n"
+                f"**User:** {member.mention} (`{member}`)\n"
+                f"**Reason:** {final_reason}"
+                + (f"\n**Delete days:** {int(e.get('ban_delete_days') or 0)}" if action == "ban" else "")
+            ),
+        )
+        if member.display_avatar:
+            emb.set_thumbnail(url=member.display_avatar.url)
+        await self._send_log(guild, emb)
+
+    # -------------------------------
+    # Event handlers
+    # -------------------------------
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
             return
 
         guild_id = message.guild.id
-        s = get_spam_conf_cached(guild_id)  # ← 매 메시지마다 정책 교차검증(캐시/DB)
+        s = get_spam_conf_cached(guild_id)  # 매 메시지마다 정책 교차검증(캐시→DB)
 
         MAX_MSGS_PER_10S = int(s["max_msgs_per_10s"])
         MAX_MENTIONS_PER_MSG = int(s["max_mentions_per_msg"])
         BLOCK_EVERYONE_HERE = bool(s["block_everyone_here"])
         ENABLE_LINK_FILTER = bool(s["enable_link_filter"])
-        WL: list[int] = s.get("everyone_whitelist", [])  # ✅ 화이트리스트
+        WL: list[int] = s.get("everyone_whitelist", [])  # everyone/here 화이트리스트 역할
 
-        # ---- 10초당 메시지 속도 제한 ----
+        # ---- 도배 측정 (10초 윈도우) ----
         now = time.time()
         gb = _msg_buffer.setdefault(guild_id, {})
         ub = gb.setdefault(message.author.id, [])
         ub.append(now)
-        _msg_buffer[guild_id][message.author.id] = [t for t in ub if now - t <= 10]
+        gb[message.author.id] = [t for t in ub if now - t <= 10]
 
-        if len(_msg_buffer[guild_id][message.author.id]) > MAX_MSGS_PER_10S:
-            await self._delete_and_log(
-                message, "log_spam_reason_rate",
-                count=len(_msg_buffer[guild_id][message.author.id])
-            )
+        if len(gb[message.author.id]) > MAX_MSGS_PER_10S:
+            await self._delete_and_log(message, "log_spam_reason_rate", count=len(gb[message.author.id]))
+            # 임계값 초과 1회 발생 → 'rate' overage 증가 (30분 내 10회 추가 시 제재)
+            if _bump_overage(guild_id, message.author.id, "rate"):
+                await self._moderate_user(message, "log_spam_reason_rate", count=len(gb[message.author.id]))
             return
 
-        # ---- @everyone/@here 남용 차단 (화이트리스트 면제) ----
+        # ---- @everyone/@here 남용 (화이트리스트 제외) ----
         if BLOCK_EVERYONE_HERE and message.mention_everyone:
             author_role_ids = {r.id for r in getattr(message.author, "roles", [])}
             is_whitelisted = any(rid in author_role_ids for rid in WL)
             if not is_whitelisted:
                 await self._delete_and_log(message, "log_spam_reason_everyone")
+                # 2분 내 3회 누적 시에만 제재
+                if await _escalate_everyone_if_needed(message):
+                    await self._moderate_user(message, "log_spam_reason_everyone")
                 return
 
-        # ---- 멘션 폭탄 ----
+        # ---- 멘션 폭탄 (실수 가능성 → 삭제만) ----
         total_mentions = len(message.mentions) + len(message.role_mentions)
         if total_mentions > MAX_MENTIONS_PER_MSG:
             await self._delete_and_log(
@@ -123,11 +284,10 @@ class SpamWatchCog(commands.Cog):
             )
             return
 
-        # ---- 링크 필터 (공식 discord.gift 허용 / 사칭·피싱 차단) ----
+        # ---- 링크 필터 ----
         if ENABLE_LINK_FILTER:
             content = getattr(message, "content", None)
             if isinstance(content, str) and content:
-                # 메시지 내 URL만 뽑아서 도메인 단위로 판정
                 urls = LINK_RE.findall(content)
                 if urls:
                     PHISHING_KEYWORDS = ("discord-airdrop", "nitrodrop", "grabfree")
@@ -135,24 +295,21 @@ class SpamWatchCog(commands.Cog):
                         lower = url.lower()
                         parsed = urlparse(url)
                         host = (parsed.netloc or "").lower()
-
-                        # ✅ 공식 Nitro 기프트 도메인은 허용
                         if host == "discord.gift":
-                            continue
-
-                        # 🚫 피싱/사칭 패턴
-                        if (
-                            "discordgift" in host                       # discordgift.* 사칭 도메인
-                            or host == "t.me"                            # 텔레그램 초대/피싱
-                            or any(k in lower for k in PHISHING_KEYWORDS)  # 기타 키워드
-                        ):
+                            continue  # 공식 Nitro 선물 링크 허용
+                        # 사칭/피싱 도메인/키워드
+                        if ("discordgift" in host) or (host == "t.me") or any(k in lower for k in PHISHING_KEYWORDS):
                             await self._delete_and_log(message, "log_spam_reason_link")
+                            # 임계값 초과 1회 발생 → 'link' overage 증가 (30분 내 10회 추가 시 제재)
+                            if _bump_overage(guild_id, message.author.id, "link"):
+                                await self._moderate_user(message, "log_spam_reason_link")
                             return
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if after.guild and not after.author.bot:
             await self.on_message(after)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SpamWatchCog(bot))

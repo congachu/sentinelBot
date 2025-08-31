@@ -6,6 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="d3a0c13e-3600-495d-8911-3a5f120fb78b" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cogs/join_watch.py" beforeDir="false" afterPath="$PROJECT_DIR$/cogs/join_watch.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cogs/spam_watch.py" beforeDir="false" afterPath="$PROJECT_DIR$/cogs/spam_watch.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/db.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/db.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
