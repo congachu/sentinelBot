@@ -24,6 +24,12 @@
   - 멘션 폭탄 / @everyone 남용 차단 (화이트리스트 예외 지원)
   - 피싱·사기 링크 필터링
 
+- **자동 제재 (Auto Enforcement)**
+  - 도배/피싱: 임계값 초과 + 30분 내 추가 10회 → **BAN**
+  - @everyone/@here: 2분 내 3회 → **BAN** (화이트리스트 제외)
+  - 신규 저연령 계정 → **KICK**
+  - 레이드 급증 → **BAN**
+
 - **비상 제어**
   - `/panic` : 모든 채널 읽기 전용화
   - `/unpanic` : 원복
@@ -33,6 +39,9 @@
   - `/backup_create` : 서버 구조 백업
   - `/backup_restore` : 백업 복구 (비파괴)
   - `/backup_list`, `/backup_delete`
+
+- **보안 점검**
+  - `/security_audit` : 서버 보안 점수 및 취약점 리포트 제공
 
 ### 🤖 봇 초대하기
 [👉 SentinelBot 초대하기](https://discord.com/oauth2/authorize?client_id=1312637093251383356)
@@ -59,6 +68,12 @@
   - Mention bomb / @everyone abuse block (with whitelist exception)
   - Phishing / scam link filtering
 
+- **Auto Enforcement**
+  - Spam/Phishing: threshold breach + 10 more within 30min → **BAN**
+  - @everyone/@here: 3 times within 2 minutes → **BAN** (whitelisted roles exempt)
+  - Young new account → **KICK**
+  - Raid surge → **BAN**
+
 - **Admin Controls**
   - `/panic` : Read-only all channels
   - `/unpanic` : Restore
@@ -68,6 +83,9 @@
   - `/backup_create` : Backup server structure
   - `/backup_restore` : Restore backup (non-destructive)
   - `/backup_list`, `/backup_delete`
+
+- **Security Audit**
+  - `/security_audit` : Provides security score & vulnerabilities report
 
 ### 🤖 Invite the Bot
 [👉 Invite SentinelBot](https://discord.com/oauth2/authorize?client_id=1312637093251383356)
